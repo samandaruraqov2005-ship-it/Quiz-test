@@ -56,6 +56,9 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;'
 if (mode === 'screen') document.body.classList.add('wide', 'screen');
 let ws, S = null, off = 0, tries = 0, msg = '';
 let joined = null; try { joined = JSON.parse(localStorage.pj || 'null'); } catch {}
+// QR/havola orqali YANGI kod bilan kirilsa, eski o'yin sessiyasi o'chiriladi va kod avtomatik to'ldiriladi
+const qc = new URLSearchParams(location.search).get('c');
+if (joined && qc && joined.code !== qc) { joined = null; localStorage.removeItem('pj'); }
 
 // ===== Ulanish: uzilsa avtomatik qayta ulanadi va o'zini qayta tanishtiradi =====
 function connect() {
@@ -98,7 +101,7 @@ let topics = [], cur = null, qs = [];
 try { topics = JSON.parse(localStorage.topics || '[]'); } catch {}
 if (!topics.length) { try { const d = JSON.parse(localStorage.qsdraft || 'null'); if (Array.isArray(d) && d.length) topics = [{ id: 1, name: 'Mavzu 1', qs: d }]; } catch {} }
 const saveTopics = () => { try { localStorage.topics = JSON.stringify(topics); } catch {} };
-const blankQ = () => ({ q: '', o: ['', '', '', ''], c: 0, time: 20 });
+const blankQ = () => ({ q: '', o: ['', '', '', ''], c: 0, time: 10 });
 const findT = id => topics.find(t => String(t.id) === String(id));
 function topicList() {
   app.innerHTML = '<h1>Mavzular</h1>' + (topics.length ? topics.map(t => `<div class="card"><button class="sm" data-rm="${t.id}">O‘chirish</button><b>${esc(t.name || 'Nomsiz mavzu')}</b><p>${t.qs.length} ta savol</p><button data-run="${t.id}">Xona yaratish</button><button class="alt" data-edit="${t.id}">Tahrirlash</button></div>`).join('') : '<p>Hali mavzu yo‘q. Birinchisini yarating.</p>') +
@@ -107,7 +110,7 @@ function topicList() {
 function home() {
   if (!cur) return topicList();
   saveTopics();
-  app.innerHTML = `<h1>Mavzuni tahrirlash</h1><input data-f="name" placeholder="Mavzu nomi" value="${esc(cur.name)}">` + qs.map((x, k) => `<div class="card">
+  app.innerHTML = `<h1>Mavzuni tahrirlash</h1><input data-f="name" placeholder="Mavzu nomi" value="${esc(cur.name)}"><div class="card"><small>Hamma savollar vaqti (soniya):</small><input type="number" id="allt" min="5" max="120" value="10"><button class="alt" id="allb">Hammasiga qo‘llash</button></div>` + qs.map((x, k) => `<div class="card">
     <b>Savol ${k + 1}</b>${qs.length > 1 ? `<button class="sm" data-del="${k}">O‘chirish</button>` : ''}
     <input data-k="${k}" data-f="q" placeholder="Savol matni" value="${esc(x.q)}">
     ${x.o.map((v, j) => `<label class="opt"><input type="radio" name="c${k}" data-k="${k}" data-f="c" data-j="${j}" ${x.c === j ? 'checked' : ''}><input data-k="${k}" data-f="o" data-j="${j}" placeholder="${'ABCD'[j]} variant" value="${esc(v)}"></label>`).join('')}
@@ -135,7 +138,7 @@ function vPlay() {
   if (S.state === 'lobby') app.innerHTML = `<div class="c"><h1>Siz o‘yinga qo‘shildingiz</h1><p class="big">${esc(me.name)}</p><p>Qatnashchilar soni: <b>${S.count}</b></p><p>Boshlovchi o‘yinni boshlashini kuting…</p></div>`;
   else if (S.state === 'question') app.innerHTML = head() + timer() + `<div class="q">${esc(S.q.text)}</div>` + opts(S.q, me.ans, undefined, me.ans !== null) + (me.ans !== null ? '<p class="c">Javobingiz qabul qilindi</p>' : '');
   else if (S.state === 'reveal') app.innerHTML = head() + `<div class="c"><p class="big ${me.ok ? 'ok' : 'bad'}">${me.ans === null ? '⏰ Vaqt tugadi' : me.ok ? '✅ To‘g‘ri!' : '❌ Noto‘g‘ri'}</p><p>+${me.pts} ball · Jami: <b>${me.score}</b></p><p>Sizning o‘rningiz: <b>${me.rank} / ${S.count}</b></p></div>` + opts(S.q, me.ans, S.correct, true) + board(S.top) + '<p class="c">Keyingi savolni kuting…</p>';
-  else app.innerHTML = `<div class="c"><h1>O‘yin tugadi</h1><p>Umumiy ball</p><p class="big">${me.score}</p><p>Yakuniy o‘rningiz: <b>${me.rank} / ${S.count}</b></p></div><h1>Eng yaxshilar</h1>` + board(S.top);
+  else app.innerHTML = `<div class="c"><h1>O‘yin tugadi</h1><p>Umumiy ball</p><p class="big">${me.score}</p><p>Yakuniy o‘rningiz: <b>${me.rank} / ${S.count}</b></p></div><h1>Eng yaxshilar</h1>` + board(S.top) + '<button class="alt" id="leave">Yangi o‘yinga kirish</button>';
 }
 
 // "/host/:kod" — boshlovchi paneli
@@ -181,10 +184,12 @@ app.addEventListener('click', e => {
   const d = b.dataset;
   if (b.id === 'add') { qs.push(blankQ()); home(); }
   else if (d.del) { qs.splice(+d.del, 1); home(); }
+  else if (b.id === 'leave') { localStorage.removeItem('pj'); location = '/play'; }
   else if (d.run) { msg = ''; send({ t: 'create', qs: findT(d.run).qs }); }
   else if (d.edit) { cur = findT(d.edit); qs = cur.qs; home(); }
   else if (d.rm) { if (confirm('Bu mavzu o‘chirilsinmi?')) { topics = topics.filter(t => String(t.id) !== d.rm); saveTopics(); topicList(); } }
   else if (b.id === 'newt') { cur = { id: Date.now(), name: '', qs: [blankQ()] }; topics.push(cur); qs = cur.qs; home(); }
+  else if (b.id === 'allb') { const v = Math.min(120, Math.max(5, +$('#allt').value || 10)); qs.forEach(x => x.time = v); home(); }
   else if (b.id === 'done') { cur = null; home(); }
   else if (b.id === 'bk') { const t = JSON.stringify(topics); if (navigator.clipboard) navigator.clipboard.writeText(t).then(() => alert('Nusxalandi. Eslatmalar (Notes) ilovasiga qo‘yib saqlang.'), () => prompt('Nusxalang:', t)); else prompt('Nusxalang:', t); }
   else if (b.id === 'rs') { const t = prompt('Zaxira matnini shu yerga qo‘ying'); try { const a = JSON.parse(t); if (Array.isArray(a)) { topics = a; saveTopics(); topicList(); } } catch { alert('Matn noto‘g‘ri'); } }
